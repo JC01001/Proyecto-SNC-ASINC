@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+flask
+pymongo>=4.13
+python-dotenv
+jinja2

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Películas - Modo {{ mode }}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; background: #111827; color: #e5e7eb; margin: 0; }
+  header { background: #1f2937; padding: 14px 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+  header h1 { margin: 0; font-size: 20px; }
+  .badge { background: #2563eb; padding: 3px 10px; border-radius: 12px; font-size: 13px; margin-left: 8px; }
+  main { max-width: 1200px; margin: 0 auto; padding: 20px; }
+  section { margin-bottom: 28px; }
+  h2 { font-size: 17px; margin: 0 0 10px; }
+  form, .bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  input, select, button { padding: 8px 10px; border-radius: 6px; border: 1px solid #374151; background: #0b1220; color: #e5e7eb; font-size: 14px; }
+  button { background: #2563eb; border: none; cursor: pointer; }
+  button.gray { background: #374151; }
+  button.red { background: #dc2626; }
+  #msg { font-size: 13px; color: #fbbf24; margin-left: 8px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
+  .card { background: #1f2937; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
+  .card img { width: 100%; height: 290px; object-fit: cover; background: #0b1220; }
+  .card .noimg { height: 60px; background: #0b1220; }
+  .card .body { padding: 10px; flex: 1; font-size: 13px; }
+  .card h3 { margin: 0 0 4px; font-size: 15px; }
+  .muted { color: #9ca3af; }
+  .card .acts { display: flex; gap: 6px; padding: 0 10px 10px; }
+  .card .acts button { flex: 1; padding: 5px; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Películas <span class="badge">Modo {{ mode }}</span></h1>
+  <span class="muted">{{ driver }} · sample_mflix.movies</span>
+</header>
+
+<main>
+  <section>
+    <h2>Buscar</h2>
+    <form id="searchForm">
+      <input id="q" placeholder="Título..." size="22">
+      <select id="genre"><option value="todos">Todos los géneros</option></select>
+      <input id="year_min" type="number" placeholder="Año desde" style="width:110px">
+      <input id="year_max" type="number" placeholder="Año hasta" style="width:110px">
+      <select id="min_rating">
+        <option value="">Cualquier calificación</option>
+        <option value="6">IMDb 6+</option><option value="7">IMDb 7+</option><option value="8">IMDb 8+</option>
+      </select>
+      <button>Buscar</button>
+      <button type="button" class="gray" onclick="clearSearch()">Limpiar</button>
+    </form>
+  </section>
+
+  <section id="resultsSection" hidden>
+    <h2>Resultados (<span id="total">0</span> encontradas, mostrando hasta 20) <span class="muted" id="searchMs"></span></h2>
+    <div id="results" class="grid"></div>
+  </section>
+
+  <section>
+    <h2>5 películas aleatorias <span class="muted" id="randomMs"></span></h2>
+    <div class="bar"><button class="gray" onclick="loadRandom()">Cargar otras 5</button></div>
+    <div id="random" class="grid"></div>
+  </section>
+
+  <section>
+    <h2 id="formTitle">Agregar película</h2>
+    <form id="movieForm">
+      <input type="hidden" id="movieId">
+      <input id="f_title" placeholder="Título" required>
+      <input id="f_year" type="number" placeholder="Año" required style="width:90px">
+      <input id="f_genres" placeholder="Géneros (coma)">
+      <input id="f_rating" type="number" step="0.1" min="0" max="10" placeholder="IMDb" style="width:90px">
+      <input id="f_plot" placeholder="Sinopsis" size="30">
+      <button id="saveBtn">Guardar</button>
+      <button type="button" class="gray" onclick="resetForm()">Cancelar</button>
+    </form>
+  </section>
+
+  <section>
+    <h2>Carga masiva</h2>
+    <div class="bar">
+      <button onclick="bulkLoad()">Cargar 1000 películas (bulk_write)</button>
+      <button class="red" onclick="bulkDelete()">Borrar las de carga masiva</button>
+      <span id="msg"></span>
+    </div>
+  </section>
+</main>
+
+<script>
+const GENRES = ["Action","Adventure","Animation","Biography","Comedy","Crime","Documentary","Drama","Family","Fantasy","Film-Noir","History","Horror","Music","Musical","Mystery","News","Romance","Sci-Fi","Short","Sport","Talk-Show","Thriller","War","Western"];
+const $ = id => document.getElementById(id);
+let current = {};   // id -> película, para editar
+
+GENRES.forEach(g => $("genre").insertAdjacentHTML("beforeend", `<option>${g}</option>`));
+
+async function api(url, method = "GET", body) {
+  const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  if (!res.ok) throw new Error((await res.json()).detail || "Error");
+  return res.json();
+}
+
+function card(m) {
+  current[m._id] = m;
+  const rating = m.imdb && m.imdb.rating ? m.imdb.rating : "S/C";
+  const img = m.poster ? `<img src="${m.poster}" onerror="this.outerHTML='<div class=noimg></div>'">` : `<div class="noimg"></div>`;
+  return `<div class="card">${img}
+    <div class="body"><h3>${m.title}</h3>
+      <div class="muted">${m.year || ""} · ⭐ ${rating}</div>
+      <div class="muted">${(m.genres || []).join(", ")}</div>
+    </div>
+    <div class="acts">
+      <button class="gray" onclick="editMovie('${m._id}')">Editar</button>
+      <button class="red" onclick="deleteMovie('${m._id}')">Eliminar</button>
+    </div></div>`;
+}
+
+async function loadRandom() {
+  const d = await api("/api/random");
+  $("random").innerHTML = d.movies.map(card).join("");
+  $("randomMs").textContent = `(${d.ms} ms)`;
+}
+
+$("searchForm").onsubmit = async e => { e.preventDefault(); await search(); };
+
+async function search() {
+  const p = new URLSearchParams({
+    q: $("q").value, genre: $("genre").value, year_min: $("year_min").value,
+    year_max: $("year_max").value, min_rating: $("min_rating").value
+  });
+  const d = await api("/api/search?" + p);
+  $("resultsSection").hidden = false;
+  $("results").innerHTML = d.movies.map(card).join("") || "<p class='muted'>Sin resultados</p>";
+  $("total").textContent = d.total;
+  $("searchMs").textContent = `(${d.ms} ms)`;
+}
+
+function clearSearch() {
+  $("searchForm").reset();
+  $("resultsSection").hidden = true;
+}
+
+// ---- CRUD ----
+$("movieForm").onsubmit = async e => {
+  e.preventDefault();
+  const body = { title: $("f_title").value, year: $("f_year").value, genres: $("f_genres").value, rating: $("f_rating").value, plot: $("f_plot").value };
+  const id = $("movieId").value;
+  try {
+    if (id) await api("/api/movies/" + id, "PUT", body); else await api("/api/movies", "POST", body);
+    resetForm(); refresh();
+  } catch (err) { alert(err.message); }
+};
+
+function editMovie(id) {
+  const m = current[id];
+  $("movieId").value = id;
+  $("f_title").value = m.title || "";
+  $("f_year").value = m.year || "";
+  $("f_genres").value = (m.genres || []).join(", ");
+  $("f_rating").value = m.imdb && m.imdb.rating || "";
+  $("f_plot").value = m.plot || "";
+  $("formTitle").textContent = "Editar película";
+  window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+}
+
+function resetForm() {
+  $("movieForm").reset(); $("movieId").value = ""; $("formTitle").textContent = "Agregar película";
+}
+
+async function deleteMovie(id) {
+  if (!confirm("¿Eliminar esta película?")) return;
+  try { await api("/api/movies/" + id, "DELETE"); refresh(); } catch (err) { alert(err.message); }
+}
+
+// ---- Carga masiva ----
+async function bulkLoad() {
+  $("msg").textContent = "Cargando...";
+  const d = await api("/api/bulk", "POST");
+  $("msg").textContent = `${d.inserted} películas insertadas en ${d.ms} ms`;
+  refresh();
+}
+
+async function bulkDelete() {
+  const d = await api("/api/bulk", "DELETE");
+  $("msg").textContent = `${d.deleted} películas eliminadas`;
+  refresh();
+}
+
+function refresh() { loadRandom(); if (!$("resultsSection").hidden) search(); }
+
+loadRandom();
+</script>
+</body>
+</html>

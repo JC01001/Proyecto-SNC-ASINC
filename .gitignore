@@ -1,0 +1,13 @@
+# Entorno y credenciales
+.env
+.env.local
+
+# Cache de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Entornos virtuales
+venv/
+.venv/
+env/
